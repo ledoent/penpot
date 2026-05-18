@@ -130,6 +130,12 @@
     [:error-report-webhook {:optional true} :string]
     [:user-feedback-destination {:optional true} :string]
 
+    ;; PENPOT_SENTRY_DSN — when set, `app.main` calls
+    ;; `io.sentry.Sentry/init` at boot and `app.http.errors` forwards
+    ;; uncaught/5xx exceptions via `Sentry/captureException`. Unset
+    ;; disables Sentry entirely; init is a no-op.
+    [:sentry-dsn {:optional true} :string]
+
     [:default-rpc-rlimit {:optional true} [::sm/vec :string]]
     [:rpc-rlimit-config {:optional true} ::fs/path]
     [:rpc-climit-config {:optional true} ::fs/path]

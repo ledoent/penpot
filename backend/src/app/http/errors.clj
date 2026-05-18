@@ -18,7 +18,23 @@
    [app.util.inet :as inet]
    [clojure.spec.alpha :as s]
    [yetti.request :as yreq]
-   [yetti.response :as yres]))
+   [yetti.response :as yres])
+  (:import
+   (io.sentry Sentry)))
+
+(defn- sentry-capture
+  "Forward a 5xx-class exception to Sentry when the SDK was initialized
+   in app.main (PENPOT_SENTRY_DSN set). No-op when the SDK isn't enabled
+   — the static `Sentry/captureException` short-circuits in that case
+   but we guard with `isEnabled` to avoid the extra call overhead. We
+   never throw from inside the error handler itself: swallow any
+   Sentry-side failure with a warn log."
+  [cause]
+  (try
+    (when (Sentry/isEnabled)
+      (Sentry/captureException ^Throwable cause))
+    (catch Throwable e
+      (l/wrn :hint "sentry: capture failed" :cause e))))
 
 (defn request->context
   "Extracts error report relevant context data from request."
@@ -110,6 +126,7 @@
   (binding [l/*context* (request->context request)]
     (let [{:keys [code] :as data} (ex-data error)
           cause (or parent-cause error)]
+      (sentry-capture cause)
       (cond
         (= code :data-validation)
         (let [explain (ex/explain data)]
@@ -149,6 +166,7 @@
   (binding [l/*context* (request->context request)]
     (let [cause (or parent-cause error)
           data  (ex-data error)]
+      (sentry-capture cause)
       (l/error :hint "internal error" :cause cause)
       {::yres/status 500
        ::yres/body (-> data
@@ -200,6 +218,7 @@
   [error request parent-cause]
   (let [edata (ex-data error)
         cause (or parent-cause error)]
+    (sentry-capture cause)
     (cond
       ;; This means that exception is not a controlled exception.
       (nil? edata)
