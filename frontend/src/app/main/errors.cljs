@@ -58,13 +58,21 @@
 ;; the CDN <script> in index.mustache and initialized with a DSN from
 ;; window.penpotSentryDsn. Returns nil and swallows any internal Sentry
 ;; failure so adding this to error paths is always safe.
+;;
+;; Externs-safety note: `captureException` is accessed via
+;; `unchecked-get` rather than `(.captureException sentry cause)` and
+;; invoked via `.call`. Sentry is loaded from a CDN at runtime so its
+;; symbols are NOT in our shadow-cljs externs file; the bare method-
+;; invocation form gets renamed by advanced optimizations and lands as
+;; `sentry.$captureException$(cause)` → "is not a function" TypeError.
 (defn- report-to-sentry
   [cause]
   (try
     (when (and (some? cause)
                (not (is-ignorable-exception? cause)))
       (when-let [sentry (unchecked-get g/window "Sentry")]
-        (.captureException sentry cause)))
+        (when-let [capture (unchecked-get sentry "captureException")]
+          (.call capture sentry cause))))
     (catch :default e
       (.warn js/console "Sentry capture failed" e))))
 

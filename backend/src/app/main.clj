@@ -596,17 +596,23 @@
    The SDK auto-bridges through SLF4J (already used by app.common.logging),
    so unhandled exceptions logged via the standard logger also surface
    in Sentry. app.http.errors additionally calls Sentry/captureException
-   on 5xx-class HTTP errors. With the env var unset this is a no-op."
+   on 5xx-class HTTP errors. With the env var unset this is a no-op.
+
+   Release tag: (:full cf/version) is empty on builds where the version
+   file wasn't baked in (typical for the fork CI's bundle path). Fall
+   back to \"unknown\" so events never arrive with release=\"\"."
   []
   (when-let [dsn (cf/get :sentry-dsn)]
-    (let [host (some-> (re-find #"@([^/]+)/" dsn) second)]
-      (l/inf :hint "sentry: init" :host host :release (:full cf/version)))
-    (Sentry/init
-     (reify io.sentry.Sentry$OptionsConfiguration
-       (configure [_ opts]
-         (.setDsn ^io.sentry.SentryOptions opts dsn)
-         (.setRelease ^io.sentry.SentryOptions opts (str (:full cf/version)))
-         (.setTracesSampleRate ^io.sentry.SentryOptions opts (Double/valueOf 0.0)))))))
+    (let [host    (some-> (re-find #"@([^/]+)/" dsn) second)
+          version (str (:full cf/version))
+          release (if (str/blank? version) "unknown" version)]
+      (l/inf :hint "sentry: init" :host host :release release)
+      (Sentry/init
+       (reify io.sentry.Sentry$OptionsConfiguration
+         (configure [_ opts]
+           (.setDsn ^io.sentry.SentryOptions opts dsn)
+           (.setRelease ^io.sentry.SentryOptions opts release)
+           (.setTracesSampleRate ^io.sentry.SentryOptions opts (Double/valueOf 0.0))))))))
 
 (defn start
   []
