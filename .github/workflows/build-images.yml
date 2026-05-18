@@ -1,0 +1,128 @@
+name: Build and Push Images (fork)
+
+# Fork-only CI: builds frontend + backend bundles from source via the
+# upstream `manage.sh` devenv-image flow, then pushes Docker images to
+# a self-hosted Zot registry. Tag layout: <branch-slug>-<short-sha>
+# (immutable) plus <branch-slug>-latest (rolling, used by Helm).
+#
+# Targets `registry.hz.ledoweb.com/ledoent` by default. Override
+# PENPOT_DOCKER_NAMESPACE in the workflow env (or via repo variables)
+# to point at Docker Hub / GHCR / another Zot.
+
+on:
+  push:
+    branches:
+      - develop
+      - 'feature/**'
+      - 'fix/**'
+  workflow_dispatch:
+    inputs:
+      images:
+        description: 'Comma-separated image list (default: frontend,backend)'
+        required: false
+        default: 'frontend,backend'
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: registry.hz.ledoweb.com
+  REGISTRY_NAMESPACE: ledoent
+
+jobs:
+  build-bundle:
+    name: Build source bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build frontend + backend bundles
+        env:
+          BUILD_WASM: 'no'
+          BUILD_STORYBOOK: 'no'
+        run: |
+          set -euxo pipefail
+          ./manage.sh build-frontend-bundle
+          ./manage.sh build-backend-bundle
+
+      - name: Stage bundles for image build
+        run: |
+          set -euxo pipefail
+          mv bundles/frontend docker/images/bundle-frontend
+          mv bundles/backend  docker/images/bundle-backend
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: penpot-bundles
+          path: |
+            docker/images/bundle-frontend
+            docker/images/bundle-backend
+          retention-days: 3
+
+  build-image:
+    name: Build & push ${{ matrix.image }}
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [frontend, backend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: penpot-bundles
+          path: docker/images/
+
+      - name: Compute tags
+        id: tags
+        run: |
+          set -euxo pipefail
+          branch_slug="${GITHUB_REF_NAME//\//-}"
+          short_sha="${GITHUB_SHA::7}"
+          repo="${REGISTRY}/${REGISTRY_NAMESPACE}/penpot-${{ matrix.image }}"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${repo}:${branch_slug}-${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "branch_latest=${repo}:${branch_slug}-latest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Zot
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ZOT_USER }}
+          password: ${{ secrets.ZOT_PASSWORD }}
+
+      - name: Build & push ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./docker/images/
+          file: ./docker/images/Dockerfile.${{ matrix.image }}
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BUNDLE_PATH=./bundle-${{ matrix.image }}/
+          tags: |
+            ${{ steps.tags.outputs.sha_tag }}
+            ${{ steps.tags.outputs.branch_latest }}
+          cache-from: type=registry,ref=${{ steps.tags.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.tags.outputs.repo }}:buildcache,mode=max
+
+      - name: Summarize
+        run: |
+          echo "### Pushed image" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`${{ steps.tags.outputs.sha_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`${{ steps.tags.outputs.branch_latest }}\`" >> "$GITHUB_STEP_SUMMARY"
