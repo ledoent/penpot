@@ -8,9 +8,19 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.exceptions :as ex]
    [app.common.time :as dt]
    [app.common.types.component :as ctk]
    [clojure.set :as set]))
+
+;; Shape types acceptable as a component's main-instance root. The
+;; Assets-panel thumbnail renderer at
+;; `frontend/src/app/main/render.cljs :: component-svg-thumbnail`
+;; only handles container shapes; pointing `:main-instance-id` at a
+;; leaf shape (`:rect`, `:circle`, `:text`, …) crashes the panel with
+;; `Error: No matching clause: <type>`. Reject on the write path so a
+;; well-formed file always renders.
+(def ^:private valid-main-instance-types #{:frame :group})
 
 (defn components
   ([file-data] (components file-data nil))
@@ -34,6 +44,16 @@
 
 (defn add-component
   [fdata {:keys [id name path main-instance-id main-instance-page annotation variant-id variant-properties]}]
+  (let [main-shape (some-> fdata :pages-index (get main-instance-page) :objects (get main-instance-id))
+        main-type  (some-> main-shape :type)]
+    (when (and (some? main-shape) (not (contains? valid-main-instance-types main-type)))
+      (ex/raise :type :validation
+                :code :invalid-add-component-main-instance-shape-type
+                :hint (str "main-instance shape must be a :frame or :group, got " (pr-str main-type))
+                :component-id id
+                :main-instance-id main-instance-id
+                :main-instance-page main-instance-page
+                :main-instance-type main-type)))
   (let [fdata (update fdata :components assoc id (touch {:id id :name name :path path}))]
     (cond-> (update-in fdata [:components id] assoc :main-instance-id main-instance-id :main-instance-page main-instance-page)
       annotation (update-in [:components id] assoc :annotation annotation)

@@ -6,12 +6,14 @@
 
 (ns common-tests.types.components-test
   (:require
+   [app.common.exceptions :as ex]
    [app.common.test-helpers.components :as thc]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.component :as ctk]
+   [app.common.types.components-list :as ctkl]
    [app.common.types.file :as ctf]
    [clojure.test :as t]))
 
@@ -397,3 +399,74 @@
       (t/is (= (:id near-copy2-nested-head) (thi/id :nested2-head)))
       (t/is (= (:id near-copy2-nested4-head) (thi/id :nested4-head)))
       (t/is (= (:id near-copy2-nested4-child) (thi/id :nested4-child))))))
+
+
+;; ---------------------------------------------------------------------------
+;; add-component main-instance shape-type validator (ledoent/penpot fix
+;; for the Assets-panel `Error: No matching clause: rect` crash). The
+;; validator runs on the write path only — `ctkl/add-component` rejects
+;; a component whose main-instance points at a leaf shape so the
+;; thumbnail renderer in the Assets panel never has to deal with one.
+
+(t/deftest test-add-component-rejects-rect-main-instance
+  (let [pid    #uuid "00000000-0000-0000-0000-000000000001"
+        rect-id #uuid "00000000-0000-0000-0000-000000000002"
+        comp-id #uuid "00000000-0000-0000-0000-000000000003"
+        rect-shape {:id rect-id :type :rect :name "leaf"}
+        fdata  {:pages-index {pid {:objects {rect-id rect-shape}}}}]
+    (t/is (thrown-with-msg?
+           #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+           #"main-instance shape must be a :frame or :group, got :rect"
+           (ctkl/add-component fdata
+                               {:id comp-id
+                                :name "Bad"
+                                :path "Atoms"
+                                :main-instance-id rect-id
+                                :main-instance-page pid})))))
+
+(t/deftest test-add-component-accepts-frame-main-instance
+  (let [pid     #uuid "00000000-0000-0000-0000-000000000001"
+        frame-id #uuid "00000000-0000-0000-0000-000000000002"
+        comp-id  #uuid "00000000-0000-0000-0000-000000000003"
+        frame    {:id frame-id :type :frame :name "main"}
+        fdata    {:pages-index {pid {:objects {frame-id frame}}}}
+        result   (ctkl/add-component fdata
+                                     {:id comp-id
+                                      :name "Good"
+                                      :path "Atoms"
+                                      :main-instance-id frame-id
+                                      :main-instance-page pid})]
+    (t/is (= frame-id (get-in result [:components comp-id :main-instance-id])))
+    (t/is (= pid     (get-in result [:components comp-id :main-instance-page])))))
+
+(t/deftest test-add-component-accepts-group-main-instance
+  (let [pid    #uuid "00000000-0000-0000-0000-000000000001"
+        grp-id #uuid "00000000-0000-0000-0000-000000000002"
+        comp-id #uuid "00000000-0000-0000-0000-000000000003"
+        grp    {:id grp-id :type :group :name "g"}
+        fdata  {:pages-index {pid {:objects {grp-id grp}}}}
+        result (ctkl/add-component fdata
+                                   {:id comp-id
+                                    :name "GroupComp"
+                                    :path "Atoms"
+                                    :main-instance-id grp-id
+                                    :main-instance-page pid})]
+    (t/is (some? (get-in result [:components comp-id])))))
+
+(t/deftest test-add-component-permissive-when-shape-not-yet-resolvable
+  ;; The validator only fires when fdata.pages-index actually carries the
+  ;; referenced page. Some change-op orderings add the main-instance
+  ;; shape after the component record; the existing tolerant behaviour
+  ;; (no shape → no validation) is preserved so we don't regress
+  ;; out-of-order ingestion.
+  (let [pid    #uuid "00000000-0000-0000-0000-000000000001"
+        leaf-id #uuid "00000000-0000-0000-0000-000000000002"
+        comp-id #uuid "00000000-0000-0000-0000-000000000003"
+        fdata  {:pages-index {pid {:objects {}}}}  ; shape not yet present
+        result (ctkl/add-component fdata
+                                   {:id comp-id
+                                    :name "Tolerant"
+                                    :path "Atoms"
+                                    :main-instance-id leaf-id
+                                    :main-instance-page pid})]
+    (t/is (some? (get-in result [:components comp-id])))))

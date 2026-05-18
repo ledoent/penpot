@@ -369,13 +369,24 @@
           height      (* (:height root-shape') zoom)
           vbox        (format-viewbox {:width (:width root-shape' 0)
                                        :height (:height root-shape' 0)})
+          ;; Only :frame and :group have wrapper factories. A malformed
+          ;; component whose main-instance is a leaf (:rect, :circle, …)
+          ;; used to crash this `case` with "No matching clause"; we now
+          ;; warn + render a placeholder so the Assets panel survives.
           root-shape-wrapper
           (mf/use-memo
            (mf/deps objects root-shape')
            (fn []
              (case (:type root-shape')
                :group (group-wrapper-factory objects)
-               :frame (frame-wrapper-factory objects))))]
+               :frame (frame-wrapper-factory objects)
+               (do
+                 (js/console.warn
+                  "component-svg: unsupported main-instance shape type"
+                  (str (:type root-shape'))
+                  "for shape" (str root-shape-id)
+                  "- rendering placeholder")
+                 nil))))]
 
       [:svg {:view-box vbox
              :width (ust/format-precision width viewbox-decimal-precision)
@@ -389,9 +400,17 @@
 
        (when-not is-hidden
          [:*
-          [:> shape-container {:shape root-shape'}
-           [:& (mf/provider muc/is-component?) {:value true}
-            [:& root-shape-wrapper {:shape root-shape' :view-box vbox}]]]
+          (if root-shape-wrapper
+            [:> shape-container {:shape root-shape'}
+             [:& (mf/provider muc/is-component?) {:value true}
+              [:& root-shape-wrapper {:shape root-shape' :view-box vbox}]]]
+            [:rect {:x 0 :y 0
+                    :width (:width root-shape' 0)
+                    :height (:height root-shape' 0)
+                    :fill "transparent"
+                    :stroke "#cccccc"
+                    :stroke-width 1
+                    :stroke-dasharray "4 2"}])
 
           (when show-grids?
             [:& empty-grids {:root-shape-id root-shape-id :objects objects}])])])))

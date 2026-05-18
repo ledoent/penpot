@@ -314,11 +314,19 @@
           (:id target-asset)
           (cpn/merge-path-item prefix (:name target-asset))))))))
 
+;; Acceptable root-shape types for a component's main-instance. Anything
+;; else (a bare :rect, :circle, …) means the component record is
+;; malformed; the renderer would crash. Short-circuit to a placeholder
+;; so a single broken record doesn't take down the Assets panel.
+(def ^:private valid-component-root-types #{:frame :group})
+
 (mf/defc component-item-thumbnail*
   "Component that renders the thumbnail image or the original SVG."
   [{:keys [file-id root-shape component container class is-hidden]}]
   (let [page-id (:main-instance-page component)
         root-id (:main-instance-id component)
+        valid-root? (or (nil? root-shape)
+                        (contains? valid-component-root-types (:type root-shape)))
         retry   (mf/use-state 0)
         wasm?   (features/active-feature? @st/state "render-wasm/v1")
         current-page-id (mf/deref refs/current-page-id)
@@ -374,10 +382,28 @@
            (mf/set-ref-val! thumbnail-requested? true)
            (st/emit! (dwt.wasm/render-thumbnail file-id page-id root-id))))))
 
-    (if (and (some? thumbnail-uri)
-             (not stale?)
-             (or (contains? cf/flags :component-thumbnails)
-                 wasm?))
+    (cond
+      (not valid-root?)
+      (do
+        (js/console.warn
+         "component-item-thumbnail: skipping render for malformed component"
+         (str (:id component))
+         "- main-instance shape type"
+         (str (:type root-shape))
+         "(must be :frame or :group)")
+        [:svg {:class class
+               :view-box "0 0 24 24"
+               :width 24 :height 24
+               :xmlns "http://www.w3.org/2000/svg"
+               :fill "none"}
+         [:rect {:x 0.5 :y 0.5 :width 23 :height 23
+                 :fill "transparent" :stroke "#cccccc"
+                 :stroke-width 0.5 :stroke-dasharray "2 2"}]])
+
+      (and (some? thumbnail-uri)
+           (not stale?)
+           (or (contains? cf/flags :component-thumbnails)
+               wasm?))
       [:& component-svg-thumbnail
        {:thumbnail-uri thumbnail-uri
         :class class
@@ -386,6 +412,7 @@
         :objects (:objects container)
         :show-grids? true}]
 
+      :else
       [:& component-svg
        {:root-shape root-shape
         :class class
