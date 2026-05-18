@@ -67,7 +67,12 @@
 
   ;; Pretty Print specs
   pretty-spec/pretty-spec {:mvn/version "0.1.4"}
-  software.amazon.awssdk/s3 {:mvn/version "2.44.4"}}
+  software.amazon.awssdk/s3 {:mvn/version "2.44.4"}
+
+  ;; Sentry SDK — Java client used by app.http.errors to forward
+  ;; backend exceptions to a self-hosted Sentry. Init at boot via
+  ;; PENPOT_SENTRY_DSN; init is a no-op when unset.
+  io.sentry/sentry {:mvn/version "7.18.1"}}
 
  :paths ["src" "resources" "target/classes"]
  :aliases

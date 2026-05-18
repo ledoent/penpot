@@ -48,6 +48,8 @@
    [integrant.core :as ig]
    [nrepl.server :as nrepl]
    [promesa.exec :as px])
+  (:import
+   (io.sentry Sentry))
   (:gen-class))
 
 (def default-metrics
@@ -589,9 +591,27 @@
 
 (def system nil)
 
+(defn- init-sentry!
+  "Initialize the Sentry Java SDK when PENPOT_SENTRY_DSN is set.
+   The SDK auto-bridges through SLF4J (already used by app.common.logging),
+   so unhandled exceptions logged via the standard logger also surface
+   in Sentry. app.http.errors additionally calls Sentry/captureException
+   on 5xx-class HTTP errors. With the env var unset this is a no-op."
+  []
+  (when-let [dsn (cf/get :sentry-dsn)]
+    (let [host (some-> (re-find #"@([^/]+)/" dsn) second)]
+      (l/inf :hint "sentry: init" :host host :release (:full cf/version)))
+    (Sentry/init
+     (reify io.sentry.Sentry$OptionsConfiguration
+       (configure [_ opts]
+         (.setDsn ^io.sentry.SentryOptions opts dsn)
+         (.setRelease ^io.sentry.SentryOptions opts (str (:full cf/version)))
+         (.setTracesSampleRate ^io.sentry.SentryOptions opts (Double/valueOf 0.0)))))))
+
 (defn start
   []
   (cf/validate!)
+  (init-sentry!)
   (ig/load-namespaces (merge system-config worker-config))
   (alter-var-root #'system (fn [sys]
                              (when sys (ig/halt! sys))
