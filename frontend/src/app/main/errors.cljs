@@ -476,6 +476,16 @@
     (and (string? stack)
          (str/includes? stack "posthog"))))
 
+(defn- network-error?
+  "True when the cause is one of Penpot's own `app.main.repo/handle-response`
+  network-failure wrappers — `(ex-info \"http error\" {:type :network |
+  :bad-gateway | :service-unavailable | :offline | ...})`. These transient
+  HTTP failures already flash a toast via the `:network` potok handler and
+  must not be reported to Sentry as application errors."
+  [cause]
+  (contains? #{:network :bad-gateway :service-unavailable :offline}
+             (:type (ex-data cause))))
+
 (defn is-ignorable-exception?
   "True when the error is known to be harmless (browser extensions, analytics,
    React/extension DOM conflicts, etc.) and should NOT be surfaced to the user."
@@ -483,10 +493,23 @@
   (let [message (ex-message cause)]
     (or (from-extension? cause)
         (from-posthog? cause)
+        (network-error? cause)
         (= message "Possible side-effect in debug-evaluate")
         (= message "Unexpected end of input")
         (str/starts-with? message "invalid props on component")
         (str/starts-with? message "Unexpected token ")
+        ;; Vendor library noise: mousetrap throws a TypeError when the
+        ;; event has an undefined target (synthetic keyboard events from
+        ;; browser extensions, automation drivers, accessibility tools).
+        ;; The user-visible behaviour is unaffected; only Sentry sees it.
+        (and (string? message)
+             (str/includes? message "mousetrapDontStop"))
+        ;; Same family: any "Cannot use 'in' operator to search for ..."
+        ;; TypeError. Always vendor-lib code; nothing actionable on our
+        ;; side. Broader than mousetrap but the pattern is specific to
+        ;; vendor code reflecting on event targets that aren't Elements.
+        (and (string? message)
+             (str/starts-with? message "Cannot use 'in' operator"))
         ;; Native AbortError DOMException: raised when an in-flight
         ;; HTTP fetch is cancelled via AbortController (e.g. by an
         ;; RxJS unsubscription / take-until chain).  These are

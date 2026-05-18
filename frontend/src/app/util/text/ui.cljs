@@ -12,11 +12,17 @@
 
 (defn v1-closest-text-editor-content
   [target]
-  (.closest ^js target ".public-DraftEditor-content"))
+  ;; Event targets aren't always Elements — Text nodes, Window, Document,
+  ;; and nodes that were removed mid-event don't expose `.closest`. Return
+  ;; nil so callers (`some-text-editor-content?` etc.) short-circuit
+  ;; cleanly instead of throwing a TypeError.
+  (when (and target (some? (.-closest ^js target)))
+    (.closest ^js target ".public-DraftEditor-content")))
 
 (defn v2-closest-text-editor-content
   [target]
-  (.closest ^js target "[data-itype=\"editor\"]"))
+  (when (and target (some? (.-closest ^js target)))
+    (.closest ^js target "[data-itype=\"editor\"]")))
 
 (defn closest-text-editor-content
   [target]
