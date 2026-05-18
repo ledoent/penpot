@@ -38,6 +38,28 @@
     <script src="{{& polyfills}}"></script>
     {{/manifest}}
 
+    <!--
+      Optional Sentry browser SDK (CDN). When the deployment templates
+      `window.penpotSentryDsn` via docker/images/files/config.js (set by
+      nginx-entrypoint.sh from $PENPOT_SENTRY_DSN), we load Sentry and
+      initialize it before the app boots so errors thrown from
+      libs.js / app_main.js get reported. When the DSN is unset the
+      CDN script still loads (~22KB gzipped) but Sentry.init never
+      runs and the SDK stays inert.
+    -->
+    <script src="https://browser.sentry-cdn.com/7.123.0/bundle.min.js" crossorigin="anonymous"></script>
+    <script>
+      if (window.penpotSentryDsn && window.Sentry) {
+        window.Sentry.init({
+          dsn: window.penpotSentryDsn,
+          release: globalThis.penpotVersionTag,
+          environment: window.penpotPublicURI || "production",
+          autoSessionTracking: false,
+          tracesSampleRate: 0,
+        });
+      }
+    </script>
+
     <!--cookie-consent-->
   </head>
   <body>

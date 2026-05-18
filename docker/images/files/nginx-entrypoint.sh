@@ -33,8 +33,22 @@ update_oidc_name() {
   fi
 }
 
+# PENPOT_SENTRY_DSN: when set, the frontend's index.mustache loads the
+# Sentry browser SDK from CDN and initializes it with this DSN. Errors
+# routed through app.main.errors/on-error (and the global
+# unhandled-error / unhandled-rejection listeners) are forwarded via
+# Sentry.captureException. Unset disables Sentry entirely.
+update_sentry_dsn() {
+  if [ -n "$PENPOT_SENTRY_DSN" ]; then
+    echo "$(sed \
+      -e "s|^//var penpotSentryDsn = .*;|var penpotSentryDsn = \"$PENPOT_SENTRY_DSN\";|g" \
+      "$1")" > "$1"
+  fi
+}
+
 update_flags /var/www/app/js/config.js
 update_oidc_name /var/www/app/js/config.js
+update_sentry_dsn /var/www/app/js/config.js
 
 #########################################
 ## Nginx Config

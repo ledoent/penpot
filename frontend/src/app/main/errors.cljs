@@ -49,6 +49,25 @@
 ;; instead of recursing until the call-stack overflows.
 (def ^:private handling-error? (volatile! false))
 
+;; Forward declaration: `is-ignorable-exception?` is defined further
+;; down in this file but used here by `report-to-sentry` to filter
+;; browser-extension / posthog / AbortError noise from Sentry events.
+(declare is-ignorable-exception?)
+
+;; Forward an exception to the Sentry browser SDK if it was loaded by
+;; the CDN <script> in index.mustache and initialized with a DSN from
+;; window.penpotSentryDsn. Returns nil and swallows any internal Sentry
+;; failure so adding this to error paths is always safe.
+(defn- report-to-sentry
+  [cause]
+  (try
+    (when (and (some? cause)
+               (not (is-ignorable-exception? cause)))
+      (when-let [sentry (unchecked-get g/window "Sentry")]
+        (.captureException sentry cause)))
+    (catch :default e
+      (.warn js/console "Sentry capture failed" e))))
+
 ;; --- Stale-asset error detection and auto-reload
 ;;
 ;; When the browser loads JS modules from different builds (e.g.  shared.js from
@@ -108,6 +127,10 @@
     (do
       (vreset! handling-error? true)
       (try
+        ;; Forward the underlying exception (if any) to Sentry. For
+        ;; map-shaped errors the cause sits under ::instance; for
+        ;; raw exceptions the error IS the cause.
+        (report-to-sentry (if (map? error) (::instance error) error))
         (if (map? error)
           (ptk/handle-error error)
           (let [data (exception->error-data error)]
@@ -515,6 +538,7 @@
                 (let [data (ex-data cause)
                       type (get data :type)]
                   (set! last-exception cause)
+                  (report-to-sentry cause)
                   (if (= :wasm-error type)
                     (on-error cause)
                     (do
@@ -541,6 +565,7 @@
                 (let [data (ex-data cause)
                       type (get data :type)]
                   (set! last-exception cause)
+                  (report-to-sentry cause)
                   (if (= :wasm-error type)
                     (on-error cause)
                     (do
