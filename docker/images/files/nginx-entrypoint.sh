@@ -46,9 +46,22 @@ update_sentry_dsn() {
   fi
 }
 
+# PENPOT_SENTRY_ENV: environment label passed to Sentry.init (e.g.
+# "production", "staging"). When unset, the inline init script in
+# index.mustache defaults to "production". Useful when one Sentry
+# project receives events from multiple deployments.
+update_sentry_env() {
+  if [ -n "$PENPOT_SENTRY_ENV" ]; then
+    echo "$(sed \
+      -e "s|^//var penpotSentryEnv = .*;|var penpotSentryEnv = \"$PENPOT_SENTRY_ENV\";|g" \
+      "$1")" > "$1"
+  fi
+}
+
 update_flags /var/www/app/js/config.js
 update_oidc_name /var/www/app/js/config.js
 update_sentry_dsn /var/www/app/js/config.js
+update_sentry_env /var/www/app/js/config.js
 
 #########################################
 ## Nginx Config

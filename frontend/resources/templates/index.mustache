@@ -52,8 +52,15 @@
       if (window.penpotSentryDsn && window.Sentry) {
         window.Sentry.init({
           dsn: window.penpotSentryDsn,
-          release: globalThis.penpotVersionTag,
-          environment: window.penpotPublicURI || "production",
+          // Release tag: penpotVersionTag (build SHA) first, fall back to
+          // penpotVersion (semver) for dev builds, then "unknown" so the
+          // field is never the empty string.
+          release: globalThis.penpotVersionTag || globalThis.penpotVersion || "unknown",
+          // Environment label: set via PENPOT_SENTRY_ENV → window.penpotSentryEnv
+          // (templated by docker/images/files/nginx-entrypoint.sh). Defaults
+          // to "production" so single-environment deployments don't need to
+          // set anything.
+          environment: window.penpotSentryEnv || "production",
           autoSessionTracking: false,
           tracesSampleRate: 0,
         });
