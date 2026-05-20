@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.logging :as l]
    [app.common.schema :as sm]
    [app.common.schema.desc-native :as smd]
    [app.common.schema.generators :as sg]
@@ -468,16 +469,25 @@
 
 ;; Changes Processing Impl
 
-#_:clj-kondo/ignore
 (defn- validate-shape
   [{:keys [id] :as shape} page-id]
+  ;; Previously this raised on the first invalid shape, killing the
+  ;; entire change batch and surfacing as bare "invalid shape found
+  ;; '<uuid>'" in Sentry with no diagnostic detail. On the ledoent
+  ;; self-hosted instance this fired 23/24h with zero actionable info.
+  ;;
+  ;; Sentry's HTTP-error capture (app.http.errors/sentry-capture) only
+  ;; forwards 5xx-class exceptions to Sentry. By NOT raising here we
+  ;; trade Sentry visibility for batch continuity — Sentry no longer
+  ;; sees individual shape-validation failures. The full schema
+  ;; explanation lands in the database logger (backend's
+  ;; app.loggers.database picks up :error level), which is where the
+  ;; operator queries when shapes go bad.
   (when-not (cts/valid-shape? shape)
-    (ex/raise :type :assertion
-              :code :data-validation
-              :hint (str "invalid shape found '" id "'")
-              :page-id page-id
-              :shape-id id
-              ::sm/explain (cts/explain-shape shape))))
+    (l/error :hint "invalid shape found, skipping validation"
+             :shape-id id
+             :page-id page-id
+             :explain (cts/explain-shape shape))))
 
 (defn- process-touched-change
   [data {:keys [id page-id component-id]}]
