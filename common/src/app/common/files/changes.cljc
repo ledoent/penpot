@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.logging :as l]
    [app.common.schema :as sm]
    [app.common.schema.desc-native :as smd]
    [app.common.schema.generators :as sg]
@@ -471,13 +472,20 @@
 #_:clj-kondo/ignore
 (defn- validate-shape
   [{:keys [id] :as shape} page-id]
+  ;; Previously this raised on the first invalid shape, killing the
+  ;; entire change batch and surfacing as bare "invalid shape found
+  ;; '<uuid>'" in Sentry with no diagnostic detail. On the ledoent
+  ;; self-hosted instance this fired 23×/24h with zero actionable info.
+  ;;
+  ;; Log the schema explanation instead so we can see WHICH field
+  ;; violates the schema, and let the batch proceed. The underlying
+  ;; data corruption still gets attention via the log+sentry warning,
+  ;; but a single bad shape no longer rolls back a user's whole edit.
   (when-not (cts/valid-shape? shape)
-    (ex/raise :type :assertion
-              :code :data-validation
-              :hint (str "invalid shape found '" id "'")
-              :page-id page-id
-              :shape-id id
-              ::sm/explain (cts/explain-shape shape))))
+    (l/error :hint "invalid shape found, skipping validation"
+             :shape-id id
+             :page-id page-id
+             :explain (cts/explain-shape shape))))
 
 (defn- process-touched-change
   [data {:keys [id page-id component-id]}]
